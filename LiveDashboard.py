@@ -1,4 +1,6 @@
-# Importing libraries
+# ===========================================
+# IMPORTING LIBRARIES
+# ===========================================
 
 import asyncio
 import threading
@@ -240,10 +242,10 @@ app.layout = html.Div(
 # 3. ALERTING MECHANISM
 # ===========================
 
-CPU_THRESHOLD = 60.0          # CPU % threshold
+CPU_THRESHOLD = 60.0          # CPU % threshold (for simulation, i have chosen 60% as the threshold - though the problem says 80%, it can be chanaged)
 ERROR_RATE_THRESHOLD = 10.0   # Error rate % threshold
-ALERT_COOLDOWN = 120          # Seconds between repeated alerts
-SUSTAIN_DURATION = 300        # Duration in seconds for sustained alerts
+ALERT_COOLDOWN = 120          # Seconds between repeated alerts (2 minutes)
+SUSTAIN_DURATION = 300        # Duration in seconds for sustained alerts (5 minutes)
 
 # Track alert state for CPU and error rate
 alert_state = {
@@ -254,7 +256,7 @@ alert_state = {
 EMAIL_FROM = "your_email@example.com"
 EMAIL_TO = "alert_recipient@example.com"
 SMTP_SERVER = "smtp.example.com"
-SMTP_PORT = 587
+SMTP_PORT = 587 #TLS
 SMTP_USER = "your_email@example.com"
 SMTP_PASS = "your_password"
 
@@ -266,9 +268,6 @@ def log_alert(message: str):
     ts = datetime.now(timezone.utc).isoformat()
     with open(ALERT_LOG_FILE, "a") as f:
         f.write(f"{ts} - {message}\n")
-
-# 3a. Threshold-based alerts
-# 3b. Minimal latency via threading
 
 def send_email_alert(subject, body):
     """
@@ -294,6 +293,9 @@ def send_email_alert(subject, body):
         print(f"[{datetime.now(timezone.utc).isoformat()}] Alert sent: {subject}")
     except Exception as e:
         print(f"Failed to send email: {e}")
+
+# 3a. Threshold-based alerts -> implemented along with configurable threshold policies in section 4
+# 3b. Minimal latency via threading -> implemented along with configurable threshold policies in section 4
 
 # ====================================
 # 4. CONFIGURABLE THRESHOLD POLICIES
