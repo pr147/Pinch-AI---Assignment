@@ -1,3 +1,5 @@
+# Importing libraries
+
 import asyncio
 import threading
 import numpy as np
@@ -9,9 +11,11 @@ from dash.dependencies import Input, Output
 import smtplib
 from email.message import EmailMessage
 
-# ===========================
-# METRIC GENERATOR
-# ===========================
+# ===========================================
+# 1. EVENT/METRIC SIMULATION & INGESTION
+# ===========================================
+
+# 1a. Simulate diverse streams of metrics
 def generate_metrics():
     requests = np.random.poisson(lam=5) + 1
     errors = np.random.binomial(n=requests, p=0.2)
@@ -24,141 +28,52 @@ def generate_metrics():
         "errors": int(errors),
     }
 
-# ===========================
-# GLOBAL DATA STORAGE
-# ===========================
+# ==================================
+# Optional: Fetch metrics from API
+# ==================================
+#
+# import requests
+# def fetch_metrics_from_api():
+#     """
+#     Fetch metrics from an external API. Currently commented out.
+#     Uncomment to use real metrics instead of simulation.
+#     """
+#     try:
+#         response = requests.get("https://your-metrics-api.com/metrics")
+#         response.raise_for_status()
+#         data = response.json()
+#         return {
+#             "timestamp": datetime.now(timezone.utc).isoformat(),
+#             "cpu_usage": data.get("cpu_usage", 0),
+#             "memory_usage": data.get("memory_usage", 0),
+#             "latency_ms": data.get("latency_ms", 0),
+#             "requests": data.get("requests", 0),
+#             "errors": data.get("errors", 0),
+#         }
+#     except Exception as e:
+#         print(f"Failed to fetch API metrics: {e}")
+#         return generate_metrics()  # fallback to simulated metrics
+
+
+# 1b. Pipeline to continuously ingest metrics
 MAX_POINTS = 500
 timestamps = deque(maxlen=MAX_POINTS)
 cpu_vals, mem_vals, lat_vals = deque(maxlen=MAX_POINTS), deque(maxlen=MAX_POINTS), deque(maxlen=MAX_POINTS)
 req_vals, err_vals, success_vals = deque(maxlen=MAX_POINTS), deque(maxlen=MAX_POINTS), deque(maxlen=MAX_POINTS)
 
-# ===========================
-# ALERT CONFIGURATION
-# ===========================
-CPU_THRESHOLD = 60.0  # lowered threshold
-ERROR_RATE_THRESHOLD = 10.0  # percent
-ALERT_COOLDOWN = 120  # seconds
-ALERT_LOG_FILE = "alert_log.txt"
-
-EMAIL_FROM = "your_email@example.com"
-EMAIL_TO = "alert_recipient@example.com"
-SMTP_SERVER = "smtp.example.com"
-SMTP_PORT = 587
-SMTP_USER = "your_email@example.com"
-SMTP_PASS = "your_password"
-
-last_alert_time = {"cpu": None, "error_rate": None}
-
-## Track last alert times, breach start times, and whether alert has been sent
-#alert_state = {
-#    "cpu": {"last_alert": None, "breach_start": None, "alert_sent": False},
-#    "error_rate": {"last_alert": None, "breach_start": None, "alert_sent": False},
-#}
-#
-## Configurable sustained duration in seconds (e.g., 5 minutes)
-#SUSTAIN_DURATION = 300  # 5 minutes
-
-# ===========================
-# ALERT FUNCTIONS
-# ===========================
-def log_alert(message: str):
-    """Append alert message to log file with timestamp."""
-    ts = datetime.utcnow().isoformat()
-    with open(ALERT_LOG_FILE, "a") as f:
-        f.write(f"{ts} - {message}\n")
-
-def send_email_alert(subject, body):
-    """Send email alert via SMTP and log alert."""
-    log_alert(f"{subject}: {body}")
-    msg = EmailMessage()
-    msg.set_content(body)
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
-    try:
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.send_message(msg)
-        print(f"[{datetime.utcnow().isoformat()}] Alert sent: {subject}")
-    except Exception as e:
-        print(f"Failed to send email: {e}")
-
-def check_alerts(cpu, error_rate):
-    now = datetime.utcnow()
-    # CPU Alert
-    if cpu[-1] > CPU_THRESHOLD:
-        if last_alert_time["cpu"] is None or (now - last_alert_time["cpu"]).total_seconds() > ALERT_COOLDOWN:
-            threading.Thread(target=send_email_alert, args=(
-                "🔥 CPU Threshold Exceeded",
-                f"CPU usage is {cpu[-1]:.1f}% (threshold {CPU_THRESHOLD}%)"
-            ), daemon=True).start()
-            last_alert_time["cpu"] = now
-    else:
-        last_alert_time["cpu"] = None
-
-    # Error Rate Alert
-    if error_rate[-1] > ERROR_RATE_THRESHOLD:
-        if last_alert_time["error_rate"] is None or (now - last_alert_time["error_rate"]).total_seconds() > ALERT_COOLDOWN:
-            threading.Thread(target=send_email_alert, args=(
-                "⚠️ Error Rate Spike",
-                f"Error rate is {error_rate[-1]:.1f}% (threshold {ERROR_RATE_THRESHOLD}%)"
-            ), daemon=True).start()
-            last_alert_time["error_rate"] = now
-    else:
-        last_alert_time["error_rate"] = None
-
-'''
-def check_alerts(cpu, error_rate):
-    now = datetime.now(timezone.utc)
-
-    # --- CPU Alert ---
-    cpu_current = cpu[-1]
-    cpu_state = alert_state["cpu"]
-
-    if cpu_current > CPU_THRESHOLD:
-        if cpu_state["breach_start"] is None:
-            cpu_state["breach_start"] = now  # start tracking breach
-        # check if sustained breach duration reached and alert not yet sent
-        elif not cpu_state["alert_sent"] and (now - cpu_state["breach_start"]).total_seconds() >= SUSTAIN_DURATION:
-            threading.Thread(target=send_email_alert, args=(
-                "🔥 CPU Threshold Sustained",
-                f"CPU usage sustained above {CPU_THRESHOLD}% for {SUSTAIN_DURATION // 60} minutes (current: {cpu_current:.1f}%)"
-            ), daemon=True).start()
-            cpu_state["alert_sent"] = True
-            cpu_state["last_alert"] = now
-    else:
-        # Reset when below threshold
-        cpu_state["breach_start"] = None
-        cpu_state["alert_sent"] = False
-
-    # --- Error Rate Alert ---
-    err_current = error_rate[-1]
-    err_state = alert_state["error_rate"]
-
-    if err_current > ERROR_RATE_THRESHOLD:
-        if err_state["breach_start"] is None:
-            err_state["breach_start"] = now
-        elif not err_state["alert_sent"] and (now - err_state["breach_start"]).total_seconds() >= SUSTAIN_DURATION:
-            threading.Thread(target=send_email_alert, args=(
-                "⚠️ Error Rate Sustained",
-                f"Error rate sustained above {ERROR_RATE_THRESHOLD}% for {SUSTAIN_DURATION // 60} minutes (current: {err_current:.1f}%)"
-            ), daemon=True).start()
-            err_state["alert_sent"] = True
-            err_state["last_alert"] = now
-    else:
-        err_state["breach_start"] = None
-        err_state["alert_sent"] = False
-'''
-
-# ===========================
-# BACKGROUND PRODUCER
-# ===========================
-async def produce_events(total_events=5000, duration=120):
+# Background Producer
+# For simulation, it produces 1000 events in 2 minutes
+async def produce_events(total_events=1000, duration=120):
     interval = duration / total_events
     cum_success, cum_errors = 0, 0
     for _ in range(total_events):
+
+        # --- Use simulated metrics for now ---
         m = generate_metrics()
+
+        # --- Uncomment the next line to switch to API metrics ---
+        # m = fetch_metrics_from_api()
+        
         ts = datetime.fromisoformat(m["timestamp"])
         timestamps.append(ts)
         cpu_vals.append(m["cpu_usage"])
@@ -180,8 +95,9 @@ def start_background_loop():
 threading.Thread(target=start_background_loop, daemon=True).start()
 
 # ===========================
-# DASH APP
+# 2. REAL-TIME VISUALIZATION
 # ===========================
+
 app = dash.Dash(__name__)
 app.title = "Live Metrics Dashboard"
 
@@ -200,9 +116,9 @@ KPI_CARD_STYLE = {
     "textAlign": "center",
 }
 
-# ===========================
-# APP LAYOUT
-# ===========================
+# 2a. Dynamic charts updating in real-time
+# 2b. User interaction (metric selection can be added if needed)
+
 app.layout = html.Div(
     style={"backgroundColor": "#f5f7fa", "padding": "20px", "fontFamily": "Arial, sans-serif"},
     children=[
@@ -319,6 +235,148 @@ app.layout = html.Div(
         dcc.Interval(id="interval-alerts", interval=1000, n_intervals=0),
     ],
 )
+
+# ===========================
+# 3. ALERTING MECHANISM
+# ===========================
+
+CPU_THRESHOLD = 60.0          # CPU % threshold
+ERROR_RATE_THRESHOLD = 10.0   # Error rate % threshold
+ALERT_COOLDOWN = 120          # Seconds between repeated alerts
+SUSTAIN_DURATION = 300        # Duration in seconds for sustained alerts
+
+# Track alert state for CPU and error rate
+alert_state = {
+    "cpu": {"last_alert": None, "breach_start": None, "alert_sent": False},
+    "error_rate": {"last_alert": None, "breach_start": None, "alert_sent": False},
+}
+
+EMAIL_FROM = "your_email@example.com"
+EMAIL_TO = "alert_recipient@example.com"
+SMTP_SERVER = "smtp.example.com"
+SMTP_PORT = 587
+SMTP_USER = "your_email@example.com"
+SMTP_PASS = "your_password"
+
+ALERT_LOG_FILE = "alert_log.txt"
+
+# 3. Core alert function: log + email
+def log_alert(message: str):
+    """Append alert message to log file with timestamp."""
+    ts = datetime.now(timezone.utc).isoformat()
+    with open(ALERT_LOG_FILE, "a") as f:
+        f.write(f"{ts} - {message}\n")
+
+# 3a. Threshold-based alerts
+# 3b. Minimal latency via threading
+
+def send_email_alert(subject, body):
+    """
+    Sends an email alert and logs the alert to a file.
+    
+    3  : Alerting mechanism
+    3a : Threshold-based
+    3b : Minimal latency
+    """
+    log_alert(f"{subject}: {body}")  # Log to file
+
+    msg = EmailMessage()
+    msg.set_content(body)
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = EMAIL_TO
+
+    try:
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Alert sent: {subject}")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+# ====================================
+# 4. CONFIGURABLE THRESHOLD POLICIES
+# ====================================
+
+# 4a. Immediate alert when threshold crossed
+# 4b. Sustained alert after defined duration
+
+def check_alerts(cpu, error_rate):
+
+    now = datetime.now(timezone.utc)
+
+    # CPU alerts
+    cpu_current = cpu[-1]
+    cpu_info = alert_state["cpu"]
+
+    # ---- 4a: Immediate alert ----
+    if cpu_current > CPU_THRESHOLD:  
+        if cpu_info["last_alert"] is None or (now - cpu_info["last_alert"]).total_seconds() > ALERT_COOLDOWN:
+            threading.Thread(
+                target=send_email_alert,
+                args=(
+                    "🔥 CPU Threshold Exceeded",
+                    f"CPU usage is {cpu_current:.1f}% (threshold {CPU_THRESHOLD}%)"
+                ),
+                daemon=True
+            ).start()
+            cpu_info["last_alert"] = now  # update last alert timestamp
+
+    # ---- 4b: Sustained alert ----
+    if cpu_current > CPU_THRESHOLD:
+        if cpu_info["breach_start"] is None:
+            cpu_info["breach_start"] = now  # start tracking breach duration
+        elif not cpu_info["alert_sent"] and (now - cpu_info["breach_start"]).total_seconds() >= SUSTAIN_DURATION:
+            threading.Thread(
+                target=send_email_alert,
+                args=(
+                    "🔥 CPU Threshold Sustained",
+                    f"CPU usage sustained above {CPU_THRESHOLD}% for {SUSTAIN_DURATION//60} minutes (current: {cpu_current:.1f}%)"
+                ),
+                daemon=True
+            ).start()
+            cpu_info["alert_sent"] = True
+            cpu_info["last_alert"] = now
+    else:
+        cpu_info["breach_start"] = None
+        cpu_info["alert_sent"] = False
+
+    # Error rate alerts
+    err_current = error_rate[-1]
+    err_info = alert_state["error_rate"]
+
+    # ---- 4a: Immediate alert ----
+    if err_current > ERROR_RATE_THRESHOLD:  
+        if err_info["last_alert"] is None or (now - err_info["last_alert"]).total_seconds() > ALERT_COOLDOWN:
+            threading.Thread(
+                target=send_email_alert,
+                args=(
+                    "⚠️ Error Rate Spike",
+                    f"Error rate is {err_current:.1f}% (threshold {ERROR_RATE_THRESHOLD}%)"
+                ),
+                daemon=True
+            ).start()
+            err_info["last_alert"] = now  # update last alert timestamp
+
+    # ---- 4b: Sustained alert ----
+    if err_current > ERROR_RATE_THRESHOLD:
+        if err_info["breach_start"] is None:
+            err_info["breach_start"] = now  # start tracking breach duration
+        elif not err_info["alert_sent"] and (now - err_info["breach_start"]).total_seconds() >= SUSTAIN_DURATION:
+            threading.Thread(
+                target=send_email_alert,
+                args=(
+                    "⚠️ Error Rate Sustained",
+                    f"Error rate sustained above {ERROR_RATE_THRESHOLD}% for {SUSTAIN_DURATION//60} minutes (current: {err_current:.1f}%)"
+                ),
+                daemon=True
+            ).start()
+            err_info["alert_sent"] = True
+            err_info["last_alert"] = now
+    else:
+        err_info["breach_start"] = None
+        err_info["alert_sent"] = False
 
 # ===========================
 # DASH CALLBACK
@@ -466,9 +524,10 @@ def update_charts(selected_metrics, pie_mode, bar_mode, latency_selection, _):
 
     return kpis, line_fig, bar_fig, pie_fig, gauge_fig, latency_fig, err_fig, throughput_fig
 
-# ===========================
+# ============================================
 # ALERT PANEL CALLBACK WITH BACKGROUND COLOR
-# ===========================
+# ============================================
+
 @app.callback(
     Output("alert-panel", "children"),
     Input("interval-alerts", "n_intervals")
@@ -508,5 +567,6 @@ def update_alert_panel(_):
 # ===========================
 # MAIN
 # ===========================
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8050, debug=True)
